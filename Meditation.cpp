@@ -1,4 +1,5 @@
 #include <memory>
+#include <tuple>
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include "clang/AST/ASTConsumer.h"
@@ -29,28 +30,41 @@ private:
     CompilerInstance *m_compiler;
 };
 
-class CFuncVisitor : public RecursiveASTVisitor<CFuncVisitor>{
+typedef std::tuple<clang::FunctionDecl*, std::vector<clang::FunctionDecl*>> FunctionDependency;
+
+class CFuncCallVisitor : public RecursiveASTVisitor<CFuncCallVisitor>{
 public:
-    explicit CFuncVisitor(std::vector<clang::FunctionDecl*>& fl):m_func_list(fl){}
-    virtual ~CFuncVisitor(){}
-public:
-    bool VisitFunctionDecl(clang::FunctionDecl *fdecl) {
-        if(fdecl->isThisDeclarationADefinition()) {
-            if(fdecl->getBody()){
-                TraverseStmt(fdecl->getBody());
-            }
-        }
+    explicit CFuncCallVisitor(std::vector<clang::FunctionDecl*>& func_list) : _FuncList(func_list) {}
+    virtual ~CFuncCallVisitor() {}
+    bool VisitCallExpr(clang::CallExpr *callexpr){
+        auto def = llvm::cast<clang::CallExpr>(*callexpr).getDirectCallee();
+        _FuncList.push_back(def);
         return true;
     }
-    bool VisitStmt(clang::Stmt *stmt){
-        if(llvm::isa<clang::CallExpr>(*stmt)){
-            auto def = llvm::cast<clang::CallExpr>(*stmt).getDirectCallee();
-            m_func_list.push_back(def);
+private:
+    std::vector<clang::FunctionDecl*>& _FuncList;
+};
+
+class CFuncDeclVisitor : public RecursiveASTVisitor<CFuncDeclVisitor>{
+public:
+    explicit CFuncDeclVisitor(std::vector<FunctionDependency>& fl):_FuncDep(fl){}
+    virtual ~CFuncDeclVisitor(){}
+public:
+    bool VisitFunctionDecl(clang::FunctionDecl *fdecl) {
+        if(fdecl->isThisDeclarationADefinition() && fdecl->isGlobal() && !fdecl->isInlined()) {
+            FunctionDependency fdep = std::make_tuple(fdecl, std::vector<clang::FunctionDecl*>{});
+            std::vector<clang::FunctionDecl*> funclist;
+            if(auto body = fdecl->getBody()){
+                CFuncCallVisitor call_v(funclist);
+                call_v.TraverseStmt(body);
+            }
+            auto m = std::make_tuple(fdecl, funclist);
+            _FuncDep.push_back(std::make_tuple(fdecl, funclist));
         }
         return true;
     }
 private:
-    std::vector<clang::FunctionDecl*>& m_func_list;
+    std::vector<FunctionDependency>& _FuncDep;
 };
 
 namespace {
@@ -64,29 +78,60 @@ bool isInputFile(const std::vector<clang::FrontendInputFile> input_files, llvm::
 }
 }
 
+
 class MeditationConsumer : public clang::ASTConsumer{
 public:
     MeditationConsumer(clang::CompilerInstance *c) :m_compiler(c) {}
     virtual bool HandleTopLevelDecl(clang::DeclGroupRef D){
         for(auto& d:D){
-            CFuncVisitor v(m_func_list);
+            CFuncDeclVisitor v(_FuncDep);
             v.TraverseDecl(d);
         }
         return true;
     }
     virtual void HandleTranslationUnit(clang::ASTContext &ctx) {
-        for(auto i:m_func_list){
-            llvm::StringRef defFileName = ctx.getSourceManager().getFilename(i->getLocation());
-            //if(!isInputFile(m_compiler->getFrontendOpts().Inputs, defFileName)){
-                i->dump();
-           // }
+        for(auto const& i:_FuncDep){
+            //llvm::outs()<<"FunctionDependency:  ";
+            llvm::outs()<<'{';
+            auto function = std::get<0>(i);
+            llvm::outs()<<R"("function")"<<':';
+            printJSON(function, ctx.getSourceManager());
+            llvm::outs()<<',';
+            llvm::outs()<<R"("dependency")"<<':';
+            llvm::outs()<<'[';
+            auto& function_deps = std::get<1>(i);
+            for(auto j = 0; j<function_deps.size(); ++j){
+                printJSON(function_deps[j], ctx.getSourceManager());
+                if(j!=function_deps.size()-1){
+                    llvm::outs()<<',';
+                }
+            }
+            llvm::outs()<<']';
+            llvm::outs()<<'}';
+            llvm::outs()<<'\n';
         }
     }
 private:
+    void print(clang::FunctionDecl*, const clang::SourceManager&);
+    void printJSON(clang::FunctionDecl*, const clang::SourceManager&);
     clang::CompilerInstance *m_compiler;
-    std::vector<clang::FunctionDecl*> m_func_list;
+    std::vector<FunctionDependency> _FuncDep;
 
 };
+
+void MeditationConsumer::printJSON(clang::FunctionDecl *function, const clang::SourceManager& sourceManager){
+    llvm::outs()<<'{'<<R"("name")"<<':'<<'\"'<<function->getName()<<'\"'<<',';
+    llvm::outs()<<R"("file")"<<':'<<'\"'<<sourceManager.getFilename(function->getLocation())<<'\"'<<'}';
+
+}
+
+void MeditationConsumer::print(clang::FunctionDecl *function, const clang::SourceManager& sourceManager){
+    llvm::outs()<<'{';
+    llvm::outs()<<sourceManager.getFilename(function->getLocStart())<<':';
+    llvm::outs()<<function->getName();
+    llvm::outs()<<'}';
+}
+
 
 class MeditationAction: public clang::ASTFrontendAction
 {
