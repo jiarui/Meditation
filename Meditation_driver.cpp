@@ -83,23 +83,18 @@ CompilerInstance *createCompilerInstance(int argc, const char **argv)
     const clang::driver::ArgStringList &cc_arguments = command.getArguments();
     unique_ptr<CompilerInvocation> invocation(new CompilerInvocation);
     CompilerInvocation::CreateFromArgs(*invocation, cc_arguments.data(), cc_arguments.data()+cc_arguments.size(), diagnostics);
+    invocation->getFrontendOpts().DisableFree = false;
 
     CompilerInstance *compiler = new CompilerInstance;
     compiler->setInvocation(invocation.release());
 
     compiler->createDiagnostics();
     if(!compiler->hasDiagnostics()) return nullptr;
-
-    //FIXME: Need a decent way to specify ResourceDir
-    if(compiler->getHeaderSearchOpts().UseBuiltinIncludes){// && compiler->getHeaderSearchOpts().ResourceDir.empty()){
-        //compiler->getHeaderSearchOpts().ResourceDir = CompilerInvocation::GetResourcesPath(argv[0], (void*)(intptr_t)getExecutablePath);
-        compiler->getHeaderSearchOpts().ResourceDir = "/usr/lib/llvm-3.7/bin/../lib/clang/3.7.1/include";
+    if(compiler->getHeaderSearchOpts().UseBuiltinIncludes && compiler->getHeaderSearchOpts().ResourceDir.empty()){
+        compiler->getHeaderSearchOpts().ResourceDir = CompilerInvocation::GetResourcesPath(argv[0], (void*)(intptr_t)getExecutablePath);
     }
 
     return compiler;
-
-
-
 
 }
 }

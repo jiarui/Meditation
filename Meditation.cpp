@@ -38,7 +38,9 @@ public:
     virtual ~CFuncCallVisitor() {}
     bool VisitCallExpr(clang::CallExpr *callexpr){
         auto def = llvm::cast<clang::CallExpr>(*callexpr).getDirectCallee();
-        _FuncList.push_back(def);
+        if(def) { //Not call back
+            _FuncList.push_back(def);
+        }
         return true;
     }
 private:
@@ -58,7 +60,6 @@ public:
                 CFuncCallVisitor call_v(funclist);
                 call_v.TraverseStmt(body);
             }
-            auto m = std::make_tuple(fdecl, funclist);
             _FuncDep.push_back(std::make_tuple(fdecl, funclist));
         }
         return true;
@@ -121,7 +122,9 @@ private:
 
 void MeditationConsumer::printJSON(clang::FunctionDecl *function, const clang::SourceManager& sourceManager){
     llvm::outs()<<'{'<<R"("name")"<<':'<<'\"'<<function->getName()<<'\"'<<',';
-    llvm::outs()<<R"("file")"<<':'<<'\"'<<sourceManager.getFilename(function->getLocation())<<'\"'<<'}';
+    llvm::outs()<<R"("file")"<<':'<<'\"'<<sourceManager.getFilename(function->getLocation())<<'\"'<<',';
+    //llvm::outs()<<R"("decl")"<<":"<<'\"';
+    //llvm::outs()<<'\"'<<'}';
 
 }
 
@@ -150,6 +153,8 @@ private:
 
 
 #include "Meditation_driver.h"
+#include "llvm/Support/ManagedStatic.h"
+
 using meditation::createCompilerInstance;
 using meditation::MeditationAction;
 int main(int argc, const char **argv)
@@ -159,5 +164,6 @@ int main(int argc, const char **argv)
         std::unique_ptr<clang::ASTFrontendAction> action(new MeditationAction(compiler.get()));
         compiler->ExecuteAction(*action);
     }
+    llvm::llvm_shutdown();
     return 0;
 }

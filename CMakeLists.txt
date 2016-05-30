@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.2)
 project(Meditation)
 set(LLVM_MODULES all)
 execute_process(COMMAND llvm-config --cppflags --libs $(LLVM_MODULES) OUTPUT_VARIABLE LLVM_FLAGS)
-set(LLVM_PATH /usr/lib/llvm-3.7)
+set(LLVM_PATH /usr/lib/llvm-3.8)
 
 include_directories(${LLVM_PATH}/include/)
 link_directories(${LLVM_PATH}/lib/)
